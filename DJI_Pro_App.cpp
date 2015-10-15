@@ -19,14 +19,15 @@ static sdk_std_msg_t std_broadcast_data;
 static pthread_mutex_t std_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* The basic API of sending Data Stream to the drone.
- * `session_mode`: the index of session id
+ * `session_mode`: frame session id
  * `is_enc`: is encrypted or not
  * `cmd_set`: command set
- * `pdata`: the pointer pointing to the send data, while `len` is the data size. i.e.sizeof(*pdata)
+ * `pdata`: the pointer pointing to the cmd data, while `len` is the data size. i.e.sizeof(*pdata)
  * `ack_callback`: the callback function, whose paramter should be `ProHeader`
  * `timeout`:the total time spent on this data send [TODO]
  * `retry time`: how many times it retry if failed [TODO]
  *
+ * -----------------------------------------------------
  * An example of using it directoly to Arm the drone:
  *
  * //the sending data content
@@ -43,7 +44,9 @@ static pthread_mutex_t std_msg_lock = PTHREAD_MUTEX_INITIALIZER;
  * //send data
  * DJI_Pro_App_Send_Data(2, 1, 0x01, 0x05, &arm, sizeof(arm), callback, 100, 1 );
  *
- * To send customized data stream, we recommend users to call this API directly,
+ * ------------------------------------------------------
+ *
+ * To send customized data stream, we recommend users using this API directly
  * because it has already handled all the retry/timeout/encryption procedures.
 */
 void DJI_Pro_App_Send_Data(unsigned char session_mode, unsigned char is_enc, unsigned char  cmd_set, unsigned char cmd_id,
@@ -69,12 +72,12 @@ void DJI_Pro_App_Send_Data(unsigned char session_mode, unsigned char is_enc, uns
    param.need_encrypt = is_enc;		  //assign encrypted or not
 	
 	/*Note: `param` is not the finalized data stream sent to the drone,
-	* there are several other processings later, 
+	* there are several other processings later in the `Pro_Send_Interface`, 
 	*		i.e. encrypt->update length->calculate CRC16->calculate CRC32
 	* also the timeout / retry_time are handled by our library
 	*/
 
-	//send frame out 
+	//send frame out for further processing
 	Pro_Send_Interface(&param); //Pro_Send_interface is defined in `DJI_Pro_Link.cpp`
 }
 
