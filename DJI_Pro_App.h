@@ -45,6 +45,7 @@
 #define API_CAMERA_VIDEO_START  0x21
 #define API_CAMERA_VIDEO_STOP   0X22
 
+//coordinates of attitude control
 #define HORIZ_ATT               0x00
 #define HORIZ_VEL               0x40
 #define HORIZ_POS               0x80
@@ -70,7 +71,7 @@ typedef float 	fp32;
 typedef double	fp64;
 
 //----------------------------------------------------------------------
-// uav std_msgs reciever
+// uav std_msgs reciever flag
 //----------------------------------------------------------------------
 #define MSG_ENABLE_FLAG_LEN		2
 
@@ -89,10 +90,6 @@ typedef double	fp64;
 
 #pragma  pack(1)
 
-/*
- *struct of gimbal contorl
- */
-
 typedef struct
 {
     signed short yaw_angle;
@@ -107,7 +104,7 @@ typedef struct
         unsigned char reserve : 4;
     }ctrl_byte;
     unsigned char duration;
-}gimbal_custom_control_angle_t;
+}gimbal_custom_control_angle_t; //struct of gimbal angle control
 
 typedef struct
 {
@@ -119,11 +116,8 @@ typedef struct
         unsigned char reserve : 7;
         unsigned char ctrl_switch : 1;//decide increment mode or absolute mode
     }ctrl_byte;
-}gimbal_custom_speed_t;
+}gimbal_custom_speed_t; //struct of gimbal speed control
 
-/*
- *struct of api contrl
- */
 
 typedef struct
 {
@@ -131,18 +125,15 @@ typedef struct
     fp32 q1;
     fp32 q2;
     fp32 q3;
-}api_quaternion_data_t;
+}api_quaternion_data_t;  //struct of quaternion data
 
 typedef struct
 {
     fp32 x;
     fp32 y;
     fp32 z;
-}api_common_data_t;
+}api_common_data_t; //struct of api common data which contains x/y/z only
 
-/*
- *struct of vellocity data
- */
 
 typedef struct
 {
@@ -152,7 +143,7 @@ typedef struct
     unsigned char health_flag         :1;
     unsigned char feedback_sensor_id  :4;
     unsigned char reserve             :3;
-}api_vel_data_t;
+}api_vel_data_t; //struct of velocity data
 
 typedef struct
 {
@@ -161,7 +152,7 @@ typedef struct
     fp32 alti;
     fp32 height;
     unsigned char health_flag;
-}api_pos_data_t;
+}api_pos_data_t; //struct of GPS data
 
 typedef struct
 {
@@ -171,44 +162,41 @@ typedef struct
     signed short throttle;
     signed short mode;
     signed short gear;
-}api_rc_data_t;
+}api_rc_data_t; //struct of rc controller data
 
 typedef struct
 {
     signed short x;
     signed short y;
     signed short z;
-}api_mag_data_t;
+}api_mag_data_t; //struct of compass data
 
 typedef struct
 {
     unsigned char cur_ctrl_dev_in_navi_mode   :3;/*0->rc  1->app  2->serial*/
     unsigned char serial_req_status           :1;/*1->opensd  0->close*/
     unsigned char reserved                    :4;
-}api_ctrl_info_data_t;
+}api_ctrl_info_data_t; //struct of control information data
 
-typedef struct
-{
-	unsigned char is_pitch_limit	:1;
-	unsigned char is_roll_limit	:1;
-	unsigned char is_yaw_limit		:1;
-	unsigned char reserved			:5;
-}api_gimbal_limit_t;
 
 typedef struct 
 {
 	fp32 roll;
 	fp32 pitch;
 	fp32 yaw;
-	api_gimbal_limit_t limit_byte;
-}api_gimbal_data_t;
+	unsigned char is_pitch_limit	:1;
+	unsigned char is_roll_limit	:1;
+	unsigned char is_yaw_limit		:1;
+	unsigned char reserved			:5;
+
+}api_gimbal_data_t; //struct of gimbal status data
 
 typedef struct 
 {
 	uint32_t time;
 	uint32_t asr_ts;
 	unsigned char sync_flag;
-}api_time_stamp_t;
+}api_time_stamp_t; //struct of time stamp data
 
 typedef struct
 {
@@ -226,7 +214,7 @@ typedef struct
     api_ctrl_info_data_t ctrl_info;
     uint8_t obtained_control;
 	 uint8_t activation;
-}sdk_std_msg_t;
+}sdk_std_msg_t; //struct of received broadcast data
 
 #pragma  pack()
 
@@ -244,7 +232,7 @@ typedef struct
 #define DATA_MAX_SIZE 	(1000u)
 #define ERR_INDEX       (0xff)
 #define EXC_DATA_SIZE	(16u)
-#define SET_CMD_SIZE	(2u)
+#define SET_CMD_SIZE	(2u) //the length of `cmd session` data + `cmd id` data
 
 //----------------------------------------------------------------------
 // for cmd agency
@@ -296,12 +284,10 @@ typedef struct
         memcpy((unsigned char *)&(_data),(unsigned char *)(_buf)+(_datalen), sizeof(_data));\
         _datalen += sizeof(_data);\
     }
+//function to extrac data from a broadcatsed package from drone
 
 #pragma  pack(1)
 
-/*
- *struct of activate data
- */
 
 typedef struct
 {
@@ -310,22 +296,14 @@ typedef struct
     unsigned int	app_ver;
     unsigned char	app_bundle_id[32];
     char *app_key;
-}activate_data_t;
-
-/*
- *struct of version query data
- */
+}activate_data_t; //struct of activation data
 
 typedef struct
 {
     unsigned short	version_ack;
     unsigned int	version_crc;
     char     	version_name[32];
-}version_query_data_t;
-
-/*
- *struct of attitude data
- */
+}version_query_data_t; //struct of version query data
 
 typedef struct
 {
@@ -334,7 +312,7 @@ typedef struct
     float	pitch_or_y;
     float	thr_z;
     float	yaw;
-}attitude_data_t;
+}attitude_data_t; //struct of attitude data
 
 #pragma  pack()
 

@@ -18,26 +18,64 @@ static unsigned char Pro_Encode_ACK[10];
 static sdk_std_msg_t std_broadcast_data;
 static pthread_mutex_t std_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* The basic API of sending Data Stream to the drone.
+ * `session_mode`: the index of session id
+ * `is_enc`: is encrypted or not
+ * `cmd_set`: command set
+ * `pdata`: the pointer pointing to the send data, while `len` is the data size. i.e.sizeof(*pdata)
+ * `ack_callback`: the callback function, whose paramter should be `ProHeader`
+ * `timeout`:the total time spent on this data send [TODO]
+ * `retry time`: how many times it retry if failed [TODO]
+ *
+ * An example of using it directoly to Arm the drone:
+ *
+ * //the sending data content
+ * uint8_t arm = 1;
+ *
+ * //the callback function
+ * static void callback(ProHeader *header) {
+ *  if (header->length - 16u <= 2) { 			//16u is the length of callback data header
+ *     memcpy((unsigned char*)&ack_data, (unsigned char*) &header -> magic, (header -> length -16u));
+ *     printf("0x%x\n", ack_data);
+ *  }
+ *	}
+ *
+ * //send data
+ * DJI_Pro_App_Send_Data(2, 1, 0x01, 0x05, &arm, sizeof(arm), callback, 100, 1 );
+ *
+ * To send customized data stream, we recommend users to call this API directly,
+ * because it has already handled all the retry/timeout/encryption procedures.
+*/
 void DJI_Pro_App_Send_Data(unsigned char session_mode, unsigned char is_enc, unsigned char  cmd_set, unsigned char cmd_id,
                    unsigned char *pdata,int len,ACK_Callback_Func ack_callback, int timeout ,int retry_time)
 {
-	ProSendParameter param;
-	unsigned char *ptemp = (unsigned char *)Pro_Encode_Data;
-	*ptemp++ = cmd_set;
-	*ptemp++ = cmd_id;
+	//ProSendParam is defined in `DJI_Pro_Link.h`
+	ProSendParameter param; 
 
-	memcpy(Pro_Encode_Data + SET_CMD_SIZE,pdata,len);
+	//build cmd frame
+	unsigned char *ptemp = (unsigned char *)Pro_Encode_Data; //pointer of data frame
+	*ptemp++ = cmd_set; //assign cmd set
+	*ptemp++ = cmd_id;  //assign cmd id
+	memcpy(Pro_Encode_Data + SET_CMD_SIZE,pdata,len); //assign cmd data
 
-	param.ack_callback = ack_callback;
-    param.session_mode = session_mode;
-	param.length = len + SET_CMD_SIZE;
-	param.buf = Pro_Encode_Data;
-    param.retry_time = retry_time;
+	//other assignments
+	param.ack_callback = ack_callback; //assign callback function
+   param.session_mode = session_mode; //assign session mode
+	param.length = len + SET_CMD_SIZE; //save the data frame length [TODO]
+	param.buf = Pro_Encode_Data;		  //save the data frame into buffer
+   param.retry_time = retry_time;	  //assign the retry time
 
-	param.ack_timeout = timeout; 
-    param.need_encrypt = is_enc;
+	param.ack_timeout = timeout;		  //assign the timeout 
+   param.need_encrypt = is_enc;		  //assign encrypted or not
 	
-	Pro_Send_Interface(&param);
+	/*Note: `param` is not the finalized data stream sent to the drone,
+	* there are several other processings later, 
+	*		i.e. encrypt->update length->calculate CRC16->calculate CRC32
+	* also the timeout / retry_time are handled by our library
+	*/
+
+	//send frame out 
+	Pro_Send_Interface(&param); //Pro_Send_interface is defined in `DJI_Pro_Link.cpp`
 }
 
 void DJI_Pro_App_Send_Ack(req_id_t req_id, unsigned char *ack, int len)

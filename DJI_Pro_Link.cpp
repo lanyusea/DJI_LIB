@@ -18,13 +18,16 @@
 static ACK_Callback_Func Call_APP_Func = 0;
 static Req_Callback_Func APP_Recv_Hook = 0;
 
+//send data to serial port, called at last
 static void Send_Pro_Data(unsigned char *buf)
 {
 	ProHeader *pHeader = (ProHeader *)buf;
 
 #ifdef PLATFORM_QT
+		//call SerialWrite
     DJI_Pro_Hw::Pro_Hw_Get_Instance()->Pro_Hw_Send(buf,pHeader->length);
 #else
+		//call SerialWrite
     Pro_Hw_Send(buf,pHeader->length);
 #endif
 }
@@ -264,109 +267,255 @@ int Pro_Ack_Interface(ProAckParameter *parameter)
 	return -1;
 }
 
+//further data processing after `DJI_Pro_App_Send_Data` in `DJI_Pro_APP.cpp`
 int Pro_Send_Interface(ProSendParameter *parameter)
 {
 	unsigned short ret = 0;
-	CMD_Session_Tab * cmd_session = (CMD_Session_Tab *) NULL;
+
+	/* CMD_Session_Tab is defined in `DJI_Pro_Rmu.h`
+	 * a CMD_Session_Tab is a session object contains every object a protocol frame should have
+	 * there are 32 CMD_Session_Tabs in total, 
+	 * all are setup in the `Session_Setup` function at init setup i.e. `DJI_Pro_Setup` function
+ 	 */
+	CMD_Session_Tab * cmd_session = (CMD_Session_Tab *) NULL; 
+
+	//Note: global_seq_num is a static value
 	static unsigned short global_seq_num = 0;
 
+	//data length evaluation
 	if(parameter->length > PRO_PURE_DATA_MAX_SIZE)
 	{
 		printf("%s:%d:ERROR,length=%d is oversize\n",__func__,__LINE__,parameter->length);
 		return -1;
 	}
 
-    switch(parameter->session_mode)
+	//different sending procedures based on the session id {0, 1, 2~31}
+   switch(parameter->session_mode)
 	{
-	case 0:
+	case 0: //for session 0
+
+		//lock the memory
 		Get_Memory_Lock();
+
+		//request the SESSION_0
+		//`Request_CMD_Session` is defined in `DJI_Pro_Rmu.cpp`
 		cmd_session = Request_CMD_Session(CMD_SESSION_0,Pro_Calc_Length(parameter->length,parameter->need_encrypt));
-		if(cmd_session == (CMD_Session_Tab *)NULL)
+
+		//condition: SESSION_0 is not available
+		if(cmd_session == (CMD_Session_Tab *)NULL) 
 		{
+			//unlock memory
 			Free_Memory_Lock();
+
 			printf("%s:%d:ERROR,there is not enough memory\n",__func__,__LINE__);
+
+			//terminate the sending procedure
 			return -1;
 		}
+
+		//encrypt and build the whole frame, the final result is saved in `cmd_sessino->mmu->pmem`
+		//`sdk_encrypt_interface` is defned in `DJI_Pro_Codec`, 
+		//`ret` is the return value, which is the total frame length after encryption and CRC calculation
 		ret = sdk_encrypt_interface(cmd_session->mmu->pmem,parameter->buf,parameter->length,
 				0,parameter->need_encrypt,cmd_session->session_id,global_seq_num);
-		if(ret == 0)
+
+		//condition: data length == 0 -> encrypt failed
+		if(ret == 0) 
 		{
 			printf("%s:%d:encrypt ERROR\n",__func__,__LINE__);
+
+			//release the current session state back to available
 			Free_CMD_Session(cmd_session);
+
+			//unlock memory
 			Free_Memory_Lock();
+			
+			//terminate the sending procedure
 			return -1;
 		}
+
+		//send data out (no more processing)
 		Send_Pro_Data(cmd_session->mmu->pmem);
+
+		//add the seq index
 		global_seq_num ++;
+
+		//release the current session state back to available
 		Free_CMD_Session(cmd_session);
+
+		//unlock memory
 		Free_Memory_Lock();
+
+		//finish the sending procedure
 		break;
-	case 1:
+
+	case 1: //for session 1
+
+		//lock the memroy
 		Get_Memory_Lock();
+
+		//request SESSION_1
+		/*Note:
+		* what `Request_CMD_Session` returns is a pointer, instead of a `new` object.
+		* therefore, the value inside cmd_session may have already been assigned, even more than once,
+		* actually the only thing we care is the seq_id, you will see how we handle it later
+		*/
 		cmd_session = Request_CMD_Session(CMD_SESSION_1,Pro_Calc_Length(parameter->length,parameter->need_encrypt));
-		if(cmd_session == (CMD_Session_Tab *)NULL)
+
+		//condition: SESSION_1 not available
+		if(cmd_session == (CMD_Session_Tab *)NULL) 
 		{
+			//unlock memory
 			Free_Memory_Lock();
 			printf("%s:%d:ERROR,there is not enough memory\n",__func__,__LINE__);
+
+			//terminate the sending procedure
 			return -1;
 		}
+		
+		//SESSION_1 may be used more than once, global_seq_number should increase if duplicated.
+		/* Note:
+		*	we only do this for session 1~31, the session 0 doesnt need callback,
+		*	therefore the seq id of session 0 doesnt matter
+		*/
 		if(global_seq_num == cmd_session->pre_seq_num)
 		{
 			global_seq_num ++;
 		}
+		
+		//encrypt and build the whole frame, the final result is saved in `cmd_sessino->mmu->pmem`
+		//`sdk_encrypt_interface` is defned in `DJI_Pro_Codec`, 
+		//`ret` is the return value, which is the total frame length after encryption and CRC calculation
 		ret = sdk_encrypt_interface(cmd_session->mmu->pmem,parameter->buf,parameter->length,
 				0,parameter->need_encrypt,cmd_session->session_id,global_seq_num);
+
+		//condition: data length == 0 -> encrypt failed
 		if(ret == 0)
 		{
 			printf("%s:%d:encrypt ERROR\n",__func__,__LINE__);
+
+			//release the current session state back to available
 			Free_CMD_Session(cmd_session);
+
+			//unlock memory
 			Free_Memory_Lock();
+
+			//terminate the sending procedure
 			return -1;
 		}
+
+		//assign the sequence id
 		cmd_session->pre_seq_num = global_seq_num ++;
+
+		//assign the callback function
 		cmd_session->ack_callback = parameter->ack_callback;
+
+		//assign the timeout
 		cmd_session->ack_timeout = (parameter->ack_timeout > POLL_TICK) ?
 									parameter->ack_timeout : POLL_TICK;
 
+		//save the current time
 		cmd_session->pre_timestamp = Get_TimeStamp();
+
+		//only send once
 		cmd_session->sent_time = 1;
+
+		//only retry once for session 1
 		cmd_session->retry_send_time = 1;
 
+		//send data out (no more processing)
 		Send_Pro_Data(cmd_session->mmu->pmem);
+
+		//unlock memory
 		Free_Memory_Lock();
+
+		/*Note:
+		*	we do not free the session here
+		*	the session state will be set back to available in callback function
+		*/
 		break;
+
 	case 2:
+		//lock memory
 		Get_Memory_Lock();
+
+		//request an available session among SESSION_2 ~ SESSION_31
 		cmd_session = Request_CMD_Session(CMD_SESSION_AUTO,Pro_Calc_Length(parameter->length,parameter->need_encrypt));
+
+		//condition: no more session available
 		if(cmd_session == (CMD_Session_Tab *)NULL)
 		{
+			//unlock memory
 			Free_Memory_Lock();
+
 			printf("%s:%d:ERROR,there is not enough memory\n",__func__,__LINE__);
+
+			//terminate sending procedure
 			return -1;
 		}
+
+		//current session may be used more than once, global_seq_number should increase if duplicated.
+		/* Note:
+		*	we only do this for session 1~31, the session 0 doesnt need callback,
+		*	therefore the seq id of session 0 doesnt matter
+		*/
 		if(global_seq_num == cmd_session->pre_seq_num)
 		{
 			global_seq_num ++;
 		}
+
+		
+		//encrypt and build the whole frame, the final result is saved in `cmd_sessino->mmu->pmem`
+		//`sdk_encrypt_interface` is defned in `DJI_Pro_Codec`, 
+		//`ret` is the return value, which is the total frame length after encryption and CRC calculation
 		ret = sdk_encrypt_interface(cmd_session->mmu->pmem,parameter->buf,parameter->length,
 				0,parameter->need_encrypt,cmd_session->session_id,global_seq_num);
+
+
+		//condition: data length == 0 -> encrypt failed
 		if(ret == 0)
 		{
 			printf("%s:%d:encrypt ERROR\n",__func__,__LINE__);
+
+			//release the current session state back to available
 			Free_CMD_Session(cmd_session);
+
+			//unlock memory
 			Free_Memory_Lock();
+
+			//terminate the sending procedure
 			return -1;
 		}
+
+		//assign the sequence id
 		cmd_session->pre_seq_num = global_seq_num ++;
+
+		//assign the callback function
 		cmd_session->ack_callback = parameter->ack_callback;
+
+		//assign the timeout
 		cmd_session->ack_timeout = (parameter->ack_timeout > POLL_TICK) ?
 									parameter->ack_timeout : POLL_TICK;
+
+		//save the current time
 		cmd_session->pre_timestamp = Get_TimeStamp();
+
+		//only send once
 		cmd_session->sent_time = 1;
+
+		//assign retry time
 		cmd_session->retry_send_time = parameter->retry_time;
+
+		//send data out (no more processing)
 		Send_Pro_Data(cmd_session->mmu->pmem);
+
+		//unlock memory
 		Free_Memory_Lock();
 
+		/*Note:
+		*	we do not free the session here
+		*	the session state will be set back to available in callback function
+		*/
 		break;
 	}
 	return 0;
