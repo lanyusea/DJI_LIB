@@ -28,7 +28,7 @@ static pthread_mutex_t std_msg_lock = PTHREAD_MUTEX_INITIALIZER;
  * `retry time`: how many times it retry if failed [TODO]
  *
  * -----------------------------------------------------
- * An example of using it directoly to Arm the drone:
+ * An example of using it directly to Arm the drone:
  *
  * //the sending data content
  * uint8_t arm = 1;
@@ -153,11 +153,15 @@ static void * Status_Ctrl_Thread_Func(void * arg)
         status_ctrl_cmd_data.cmd_sequence ++;
         status_ctrl_cmd_data.cmd_data = *cmd;
         Save_Status_Ctrl_Return_Code(SDK_ERR_NO_RESPONSE);
+
+		//send a drone action request
         DJI_Pro_App_Send_Data(2,1,MY_CTRL_CMD_SET, API_CMD_REQUEST,(unsigned char*)&status_ctrl_cmd_data,
                   sizeof(status_ctrl_cmd_data),DJI_Pro_Status_Ctrl_CallBack,cmd_timeout, retry_time);
         /* first stage poll */
         usleep(cmd_timeout * retry_time * 1000);
         ack_data = Get_Status_Ctrl_Return_Code();
+
+		//condition: return value failed or no return value
         if(ack_data == SDK_ERR_NO_RESPONSE || ack_data == SDK_ERR_COMMAND_NOT_SUPPORTED
               || ack_data == REQ_TIME_OUT || ack_data == REQ_REFUSE)
         {
@@ -171,6 +175,8 @@ static void * Status_Ctrl_Thread_Func(void * arg)
             }
             break;
         }
+
+		//condition: return value 0x02: action start
         else if(ack_data == 0x0002)
         {
              /* second stage poll */
@@ -178,11 +184,15 @@ static void * Status_Ctrl_Thread_Func(void * arg)
             while(retry_time --)
             {
                 sleep(1);
+
+				//check the progress of drone action request
                 DJI_Pro_App_Send_Data(2, 1,MY_CTRL_CMD_SET, API_CMD_STATUS_REQUEST,(unsigned char*)&status_ctrl_cmd_data.cmd_sequence,
                           1,DJI_Pro_Status_Ctrl_CallBack, cmd_timeout, 1);
 
                 usleep(cmd_timeout * 1000);
                 ack_data = Get_Status_Ctrl_Return_Code();
+
+				//condition: request is running
                 if(ack_data == 0x0003)
                 {
                     printf("%s,line %d,Command is running\n",__func__,__LINE__);
@@ -191,6 +201,7 @@ static void * Status_Ctrl_Thread_Func(void * arg)
                 else
                     break;
             }
+			//condition: request succeed
             if(ack_data == 0x0005)
             {
                 /* do some delay here to make sure drone being
@@ -228,6 +239,7 @@ static void * Status_Ctrl_Thread_Func(void * arg)
  * return:-1->parameter error or previous cmd is not finish,otherwise 0
  */
 
+//entrance function
 int DJI_Pro_Status_Ctrl(unsigned char cmd,Command_Result_Notify user_notice_entrance)
 {
     static unsigned char cur_cmd = 0;
@@ -245,6 +257,7 @@ int DJI_Pro_Status_Ctrl(unsigned char cmd,Command_Result_Notify user_notice_entr
     p_status_ctrl_interface = user_notice_entrance ? user_notice_entrance : 0;
     cur_cmd = cmd;
 
+	//start a new thread for task
     if(DJI_Pro_Create_Thread(Status_Ctrl_Thread_Func,&cur_cmd) != 0)
     {
         status_ctrl_lock = 0;
@@ -524,6 +537,7 @@ int DJI_Pro_Send_To_Mobile_Device(unsigned char *data,unsigned char len,
 
 static Command_Result_Notify p_control_management_interface = 0;
 
+//callback function
 static void DJI_Pro_Control_Management_CallBack(ProHeader *header)
 {
     unsigned short ack_data = 0xFFFF;
@@ -533,49 +547,62 @@ static void DJI_Pro_Control_Management_CallBack(ProHeader *header)
         if(p_control_management_interface)
             p_control_management_interface(ack_data);
 
-    }
-    else
-    {
-        printf("%s,line %d:ERROR,ACK is exception,seesion id %d,sequence %d\n",
-               __func__,__LINE__,header->session_id,header->sequence_number);
-    }
+    
+		switch(ack_data)
+		{
+			case 0x0001:
+				printf("%s,line %d, release control successfully\n",__func__,__LINE__);
+				pthread_mutex_lock(&std_msg_lock);
+				std_broadcast_data.obtained_control= 0;
+				pthread_mutex_unlock(&std_msg_lock);
+				break;
+			case 0x0002:
+				printf("%s,line %d, obtain control successfully\n",__func__,__LINE__);
+				pthread_mutex_lock(&std_msg_lock);
+				std_broadcast_data.obtained_control = 1;
+				pthread_mutex_unlock(&std_msg_lock);
+				break;
+			case 0x0003:
+				printf("%s,line %d, obtain control failed\n",__func__,__LINE__);
+				pthread_mutex_lock(&std_msg_lock);
+				std_broadcast_data.obtained_control = 2;
+				pthread_mutex_unlock(&std_msg_lock);
+				break;
+			default:
+				printf("%s,line %d, there is unkown error,ack=0x%X\n",__func__,__LINE__,ack_data);
+				pthread_mutex_lock(&std_msg_lock);
+				std_broadcast_data.obtained_control = 3;
+				pthread_mutex_unlock(&std_msg_lock);
+				break;
+		}
+	}
+	else
+	{
+		printf("%s,line %d:ERROR,ACK is exception,seesion id %d,sequence %d\n",
+				__func__,__LINE__,header->session_id,header->sequence_number);
+	}
 
-    switch(ack_data)
-    {
-    case 0x0001:
-        printf("%s,line %d, release control successfully\n",__func__,__LINE__);
-			 pthread_mutex_lock(&std_msg_lock);
-            std_broadcast_data.obtained_control= 0;
-			 pthread_mutex_unlock(&std_msg_lock);
-        break;
-    case 0x0002:
-        printf("%s,line %d, obtain control successfully\n",__func__,__LINE__);
-			 pthread_mutex_lock(&std_msg_lock);
-            std_broadcast_data.obtained_control = 1;
-			 pthread_mutex_unlock(&std_msg_lock);
-        break;
-    case 0x0003:
-        printf("%s,line %d, obtain control failed\n",__func__,__LINE__);
-			 pthread_mutex_lock(&std_msg_lock);
-            std_broadcast_data.obtained_control = 2;
-			 pthread_mutex_unlock(&std_msg_lock);
-        break;
-    default:
-        printf("%s,line %d, there is unkown error,ack=0x%X\n",__func__,__LINE__,ack_data);
-			 pthread_mutex_lock(&std_msg_lock);
-           std_broadcast_data.obtained_control = 3;
-			 pthread_mutex_unlock(&std_msg_lock);
-        break;
-    }
 }
 
+//Obtain control function
 int DJI_Pro_Control_Management(unsigned char cmd,Command_Result_Notify user_notice_entrance)
 {
-    unsigned char data = cmd & 0x1;
-    DJI_Pro_App_Send_Data(2,1, MY_CTRL_CMD_SET, API_CTRL_MANAGEMENT,
-               &data,1,NULL,500,1);
-    usleep(50000);
+	unsigned char data = cmd & 0x1;
+	//obtain control once with no callback function
+	DJI_Pro_App_Send_Data(2,1, MY_CTRL_CMD_SET, API_CTRL_MANAGEMENT,
+			&data,1,NULL,500,1);
+
+	/* Note: due to the limited processing ability of N1, 
+	 * the `obtain_control` command will not be suspend, instead, it will be terminated immediately
+	 * therefore, the return value is not the actual command response, but the current state
+	 * that is the reason why we need another obtain_control to check the result (i.e. the state after first command)
+	 */
+	usleep(50000);
+
+
     p_control_management_interface = user_notice_entrance ? user_notice_entrance : 0;
+
+	//obtain control again with callback for checking result
     DJI_Pro_App_Send_Data(2,1, MY_CTRL_CMD_SET, API_CTRL_MANAGEMENT,
                &data,1,DJI_Pro_Control_Management_CallBack,500,1);
     return 0;
